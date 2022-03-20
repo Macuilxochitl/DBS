@@ -3,13 +3,16 @@ import time
 
 from flask import Flask, request
 from db import insert_data, get_all_data
-import requests
+from collections import OrderedDict, defaultdict
 
 from utils import make_ok_response, make_json_response, make_error_response
-from redis_utils import add_node, del_node, get_all_nodes
-from config import IS_CENTRAL_NODE, NODE_PORT, CENTRAL_NODE_ADDRESS, NODE_NAME, NODE_ADDRESS, NODE_CHECK_INTERVAL
+from api_utils import ping, register, get_all_node, get_all_node_leader
+from redis_utils import add_node, del_node, get_all_nodes_from_redis
+from config import IS_CENTRAL_NODE, NODE_PORT, NODE_NAME, NODE_ADDRESS, NODE_CHECK_INTERVAL
 
 app = Flask(__name__)
+
+LEADER = None
 
 
 @app.route('/register/', methods=['GET', 'PUT'])
@@ -23,7 +26,7 @@ def register_handler():
     if not IS_CENTRAL_NODE:
         return make_error_response("This is a common node, not provide Registry service.")
     if request.method == 'GET':
-        return make_json_response(get_all_nodes())
+        return make_json_response(get_all_nodes_from_redis())
     if request.method == 'PUT':
         req = request.json
         res = add_node(req.get("name"), req.get("address"))
@@ -31,6 +34,18 @@ def register_handler():
             return make_ok_response()
         else:
             return make_error_response("Insert failed.")
+
+
+@app.route('/leader/', methods=['GET'])
+def leader_handler():
+    """
+    leader handler, get node's now leader
+    :return: Flask response
+    """
+    if IS_CENTRAL_NODE:
+        return make_error_response("This is a central node, not provide Data service.")
+    if request.method == 'GET':
+        return make_json_response({"leader": LEADER})
 
 
 @app.route('/data/', methods=['GET', 'PUT'])
@@ -47,6 +62,8 @@ def data_handler():
         return make_json_response(get_all_data())
     if request.method == 'PUT':
         req = request.json
+        req['data_id'] = req.get('id')
+        del req['id']
         insert_data(req)
         return make_ok_response()
 
@@ -61,46 +78,92 @@ def ping_handler():
         return make_json_response({"name": NODE_NAME, "address": NODE_ADDRESS})
 
 
-def register():
-    reg = False
-    try:
-        r = requests.put('http://{}/register/'.format(CENTRAL_NODE_ADDRESS),
-                         json={'name': NODE_NAME, "address": NODE_ADDRESS}).json()
-        print("Register result: {}".format(r))
-        if r.get("result", "") == "ok":
-            reg = True
-    except Exception as e:
-        print(e)
-    if not reg:
-        print("Register failed! exiting...")
-        exit(-1)
-
-
-def check_node(name, address):
-    alive = False
-    try:
-        r = requests.get('http://{}/ping/'.format(address)).json()
-        if r.get("result", "") == "ok":
-            alive = True
-    except Exception as e:
-        print(e)
+def check_node(name, address) -> bool:
+    alive = ping(address)
     if not alive:
         print("Node {}({}) is gone".format(name, address))
-        del_node(name)
+    return alive
+
+
+def vote_leader() -> (str, str):
+    while True:
+        nodes = get_all_node()
+
+        # get now all node's leader
+        all_node_leader = get_all_node_leader()
+        all_node_leader = {k: v for k, v in all_node_leader.items() if v}
+        # cal leader appear count
+        leader_count = defaultdict(int)
+        for node_name, leader_name in all_node_leader.items():
+            leader_count[leader_name] += 1
+
+        leader_count = OrderedDict(sorted(leader_count.items(), key=lambda i: i[1]))
+
+        leader_name = None
+
+        if leader_count:
+            leader_name, count = next(reversed(leader_count))
+
+        # if the leader that have max count means this is our leader,
+        #   but still need to check if it is alive to avoid this is due to other node's delay.
+
+        if leader_name and leader_name in nodes and check_node(leader_name, nodes[leader_name]):
+            return leader_name, nodes[leader_name]
+
+        # if no leader or leader is unreachable, need to vote for new one.
+        d = OrderedDict()
+        for name, data in nodes.items():
+            d[name] = len(data)
+        leader = next(reversed(OrderedDict(sorted(d.items(), key=lambda i: (i[1], i[0])))))
+
+        global LEADER
+        LEADER = leader
+
+        time.sleep(1)
+
+
+def leader_checker():
+    """
+    Running in common node, used to check if leader node is alive or will vote for new one.
+    """
+    leader_name = None
+    leader_address = None
+    while True:
+        if not leader_name:
+            leader_name, leader_address = vote_leader()
+        if not check_node(leader_name, leader_address):
+            leader_name, leader_address = None, None
+        else:
+            global LEADER
+            LEADER = leader_name
+        time.sleep(NODE_CHECK_INTERVAL)
 
 
 def node_checker():
+    """
+    Running in central node, used to check if there's dead node in all registered node,
+        and remove it from registered node if it's.
+    """
     while True:
-        nodes = get_all_nodes()
+        nodes = get_all_nodes_from_redis()
         for name, address in nodes.items():
-            check_node(name, address)
+            if not check_node(name, address):
+                del_node(name)
         time.sleep(NODE_CHECK_INTERVAL)
 
 
 if __name__ == '__main__':
-    if not IS_CENTRAL_NODE:
-        register()
+
+    # if this is common node and register failed that exit.
+    if not IS_CENTRAL_NODE and not register():
+        print("Register failed! exiting...")
+        exit(-1)
+
     if IS_CENTRAL_NODE:
-        t = threading.Thread(target=node_checker)
-        t.start()
+        target = node_checker
+    else:
+        target = leader_checker
+    t = threading.Thread(target=target)
+    t.start()
+
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)

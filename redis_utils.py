@@ -29,7 +29,7 @@ def del_node(name) -> int:
     return r.hdel("node", name)
 
 
-def get_all_nodes() -> dict:
+def get_all_nodes_from_redis() -> dict:
     """
     return all node's information.
     :return:
