@@ -20,6 +20,15 @@ def add_node(name, address) -> bool:
         return False
 
 
+def del_node(name) -> int:
+    """
+    del a node in redis.
+    :param name: node's name
+    :return: del result
+    """
+    return r.hdel("node", name)
+
+
 def get_all_nodes() -> dict:
     """
     return all node's information.

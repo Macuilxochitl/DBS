@@ -1,10 +1,13 @@
+import threading
+import time
+
 from flask import Flask, request
 from db import insert_data, get_all_data
 import requests
 
 from utils import make_ok_response, make_json_response, make_error_response
-from redis_utils import add_node, get_all_nodes
-from config import IS_CENTRAL_NODE, NODE_PORT, CENTRAL_NODE_ADDRESS, NODE_NAME, NODE_ADDRESS
+from redis_utils import add_node, del_node, get_all_nodes
+from config import IS_CENTRAL_NODE, NODE_PORT, CENTRAL_NODE_ADDRESS, NODE_NAME, NODE_ADDRESS, NODE_CHECK_INTERVAL
 
 app = Flask(__name__)
 
@@ -62,10 +65,9 @@ def register():
     reg = False
     try:
         r = requests.put('http://{}/register/'.format(CENTRAL_NODE_ADDRESS),
-                         json={'name': NODE_NAME, "address": NODE_ADDRESS})
-        res = r.json()
-        print("Register result: {}".format(res))
-        if res.get("result", "") == "ok":
+                         json={'name': NODE_NAME, "address": NODE_ADDRESS}).json()
+        print("Register result: {}".format(r))
+        if r.get("result", "") == "ok":
             reg = True
     except Exception as e:
         print(e)
@@ -74,7 +76,31 @@ def register():
         exit(-1)
 
 
+def check_node(name, address):
+    alive = False
+    try:
+        r = requests.get('http://{}/ping/'.format(address)).json()
+        if r.get("result", "") == "ok":
+            alive = True
+    except Exception as e:
+        print(e)
+    if not alive:
+        print("Node {}({}) is gone".format(name, address))
+        del_node(name)
+
+
+def node_checker():
+    while True:
+        nodes = get_all_nodes()
+        for name, address in nodes.items():
+            check_node(name, address)
+        time.sleep(NODE_CHECK_INTERVAL)
+
+
 if __name__ == '__main__':
     if not IS_CENTRAL_NODE:
         register()
+    if IS_CENTRAL_NODE:
+        t = threading.Thread(target=node_checker)
+        t.start()
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
