@@ -48,6 +48,16 @@ def data_handler():
         return make_ok_response()
 
 
+@app.route('/ping/', methods=['GET'])
+def ping_handler():
+    """
+    ping handler, will return name and address of node, used to check if node is alive.
+    :return: Flask response
+    """
+    if request.method == 'GET':
+        return make_json_response({"name": NODE_NAME, "address": NODE_ADDRESS})
+
+
 def register():
     reg = False
     try:
