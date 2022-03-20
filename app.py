@@ -1,9 +1,10 @@
 from flask import Flask, request
 from db import insert_data, get_all_data
+import requests
 
 from utils import make_ok_response, make_json_response, make_error_response
 from redis_utils import add_node, get_all_nodes
-from config import IS_CENTRAL_NODE, NODE_PORT
+from config import IS_CENTRAL_NODE, NODE_PORT, CENTRAL_NODE_ADDRESS, NODE_NAME, NODE_ADDRESS
 
 app = Flask(__name__)
 
@@ -47,5 +48,23 @@ def data_handler():
         return make_ok_response()
 
 
+def register():
+    reg = False
+    try:
+        r = requests.put('http://{}/register/'.format(CENTRAL_NODE_ADDRESS),
+                         json={'name': NODE_NAME, "address": NODE_ADDRESS})
+        res = r.json()
+        print("Register result: {}".format(res))
+        if res.get("result", "") == "ok":
+            reg = True
+    except Exception as e:
+        print(e)
+    if not reg:
+        print("Register failed! exiting...")
+        exit(-1)
+
+
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=NODE_PORT, debug=True)
+    if not IS_CENTRAL_NODE:
+        register()
+    app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
