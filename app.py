@@ -102,7 +102,7 @@ def vote_leader() -> (str, str):
         leader_name = None
 
         if leader_count:
-            leader_name, count = next(reversed(leader_count))
+            leader_name = next(reversed(leader_count))
 
         # if the leader that have max count means this is our leader,
         #   but still need to check if it is alive to avoid this is due to other node's delay.
