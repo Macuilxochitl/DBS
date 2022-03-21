@@ -1,6 +1,10 @@
 from flask import Flask, make_response, jsonify
 
 
+def validate_data(data) -> bool:
+    return True
+
+
 def make_ok_response() -> Flask.response_class:
     """
     :return: return a default ok response

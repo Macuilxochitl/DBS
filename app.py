@@ -6,7 +6,7 @@ from db import (check_data_id_dup, get_all_data_from_db, insert_data_to_prepare,
                 submit_prepare, del_prepare, insert_data)
 from collections import OrderedDict, defaultdict
 
-from utils import make_ok_response, make_json_response, make_error_response
+from utils import make_ok_response, make_json_response, make_error_response, validate_data
 from api_utils import (ping, register, get_all_node, get_all_node_leader,
                        send_proposal, kill_node, send_prepare, send_submit, send_rollback, get_all_data)
 from redis_utils import add_node, del_node, get_all_nodes_from_redis
@@ -107,6 +107,12 @@ def data_handler():
         return make_json_response(get_all_data_from_db())
     if request.method == 'PUT':
         req = request.json
+
+        ret = validate_data(req)
+
+        if not ret:
+            return make_error_response("Validate data failed.")
+
         req['data_id'] = req.get('id')
         del req['id']
         ret, msg = send_proposal(get_all_node().get(LEADER), req)
