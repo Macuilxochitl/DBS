@@ -2,17 +2,63 @@ import threading
 import time
 
 from flask import Flask, request
-from db import insert_data, get_all_data
+from db import check_data_id_dup, get_all_data, insert_data_to_prepare, submit_prepare, del_prepare
 from collections import OrderedDict, defaultdict
 
 from utils import make_ok_response, make_json_response, make_error_response
-from api_utils import ping, register, get_all_node, get_all_node_leader
+from api_utils import (ping, register, get_all_node, get_all_node_leader,
+                       send_proposal, kill_node, send_prepare, send_submit, send_rollback)
 from redis_utils import add_node, del_node, get_all_nodes_from_redis
 from config import IS_CENTRAL_NODE, NODE_PORT, NODE_NAME, NODE_ADDRESS, NODE_CHECK_INTERVAL
 
 app = Flask(__name__)
 
 LEADER = None
+
+
+def prepare(data) -> (bool, list):
+    """
+
+    :return: result of prepare, False if anyone is False
+    """
+    success = []
+    for name, address in get_all_node().items():
+        ret, msg = send_prepare(address, data)
+        if not ret:
+            return False, success
+        else:
+            success.append(name)
+    return True, success
+
+
+def submit() -> (bool, list):
+    """
+
+    :return: result of submit, False if anyone is False
+    """
+    success = []
+    for name, address in get_all_node().items():
+        ret, msg = send_submit(address)
+        if not ret:
+            return False, success
+        else:
+            success.append(name)
+    return True
+
+
+def rollback(nodes, data) -> list:
+    """
+
+    :return: result of rollback, list of node who is rollback failed
+    """
+    failed = []
+    for name, address in get_all_node().items():
+        if name not in nodes:
+            continue
+        ret, msg = send_rollback(address, data)
+        if not ret:
+            failed.append(name)
+    return failed
 
 
 @app.route('/register/', methods=['GET', 'PUT'])
@@ -64,7 +110,113 @@ def data_handler():
         req = request.json
         req['data_id'] = req.get('id')
         del req['id']
-        insert_data(req)
+        ret, msg = send_proposal(get_all_node().get(LEADER), req)
+        if ret:
+            return make_ok_response()
+        else:
+            return make_error_response(msg)
+
+
+@app.route('/prepare/', methods=['PUT'])
+def prepare_handler():
+    """
+    prepare handler, will insert data to prepare db and return result.
+    :return: Flask response
+    """
+    if IS_CENTRAL_NODE:
+        return make_error_response("This is a central node, not provide Data service.")
+    if request.method == 'PUT':
+        try:
+            req = request.json
+            ret = insert_data_to_prepare(req)
+            if ret:
+                return make_ok_response()
+            else:
+                return make_error_response("prepare failed: {}".format(ret))
+        except Exception as e:
+            return make_error_response("prepare failed: {}".format(e))
+
+
+@app.route('/submit/', methods=['PUT'])
+def submit_handler():
+    """
+    submit handler, will move prepare data to data and return result.
+    :return: Flask response
+    """
+    if IS_CENTRAL_NODE:
+        return make_error_response("This is a central node, not provide Data service.")
+    if request.method == 'PUT':
+        try:
+            ret = submit_prepare()
+            if ret:
+                return make_ok_response()
+            else:
+                return make_error_response("submit failed: {}".format(ret))
+        except Exception as e:
+            return make_error_response("submit failed: {}".format(e))
+
+
+@app.route('/rollback/', methods=['PUT'])
+def rollback_handler():
+    """
+    rollback handler, will delete prepare data.
+    :return: Flask response
+    """
+    if IS_CENTRAL_NODE:
+        return make_error_response("This is a central node, not provide Data service.")
+    if request.method == 'PUT':
+        try:
+            req = request.json
+            ret = del_prepare(req)
+            if ret:
+                return make_ok_response()
+            else:
+                return make_error_response("rollback failed: {}".format(ret))
+        except Exception as e:
+            return make_error_response("rollback failed: {}".format(e))
+
+
+@app.route('/proposal/', methods=['PUT'])
+def proposal_handler():
+    """
+    proposal handler, Leader only. Used to submit a proposal from client.
+    :return: Flask response
+    """
+    if IS_CENTRAL_NODE:
+        return make_error_response("This is a central node, not provide Data service.")
+    if request.method == 'PUT':
+        req = request.json
+
+        ret = check_data_id_dup(req)
+        if not ret:
+            return make_error_response("dup id!")
+
+        ret, success = prepare(req)
+        if not ret:
+
+            ret = rollback(success, req)
+
+            if not ret:
+                return make_error_response("prepare failed, rollback success!")
+            else:
+                nodes = get_all_node()
+                for name in ret:
+                    kill_node(nodes[name])
+                return make_error_response("prepare failed, rollback failed!")
+
+        ret, success = submit()
+        if not ret:
+
+            ret = rollback(success, req)
+
+            if not ret:
+                return make_error_response("submit failed, rollback success!")
+            else:
+                nodes = get_all_node()
+                for name in ret:
+                    kill_node(nodes[name])
+                return make_error_response("submit failed, rollback failed!")
+
         return make_ok_response()
 
 
@@ -76,6 +228,16 @@ def ping_handler():
     """
     if request.method == 'GET':
         return make_json_response({"name": NODE_NAME, "address": NODE_ADDRESS})
+
+
+@app.route('/kill/', methods=['GET'])
+def kill_handler():
+    """
+    kill node when needed...
+    :return: Flask response
+    """
+    if request.method == 'GET':
+        exit(-1)
 
 
 def check_node(name, address) -> bool:
