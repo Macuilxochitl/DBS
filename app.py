@@ -246,6 +246,9 @@ def check_node(name, address) -> bool:
 
 
 def vote_leader() -> (str, str):
+    """
+    Used to vote leader, will return name and address of leader.
+    """
     while True:
         nodes = get_all_node()
 

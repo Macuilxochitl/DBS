@@ -3,6 +3,11 @@ from config import CENTRAL_NODE_ADDRESS, NODE_NAME, NODE_ADDRESS
 
 
 def get_all_data(address) -> [dict]:
+    """
+    Get all data from a node.
+    :param address: address of node
+    :return: data, e.g. [{"data_id": "1", "raw": "a", "signature": "aaa"}]
+    """
     try:
         r = requests.get('http://{}/data/'.format(address)).json()
         if r.get("result", "") == "ok":
@@ -13,6 +18,11 @@ def get_all_data(address) -> [dict]:
 
 
 def ping(address) -> bool:
+    """
+    Check a node if is alive.
+    :param address: address of node
+    :return: result of check, bool
+    """
     ret = False
     try:
         r = requests.get('http://{}/ping/'.format(address)).json()
@@ -24,6 +34,10 @@ def ping(address) -> bool:
 
 
 def register() -> bool:
+    """
+    Register to central node.
+    :return: result of register, bool
+    """
     ret = False
     try:
         r = requests.put('http://{}/register/'.format(CENTRAL_NODE_ADDRESS),
@@ -37,6 +51,12 @@ def register() -> bool:
 
 
 def send_proposal(address, data) -> (bool, str):
+    """
+    Send proposal to a node.
+    :param address: address of node
+    :param data: data, e.g. [{"data_id": "1", "raw": "a", "signature": "aaa"}]
+    :return: result, bool and msg if failed.
+    """
     ret = False
     msg = None
     try:
@@ -53,6 +73,12 @@ def send_proposal(address, data) -> (bool, str):
 
 
 def send_prepare(address, data) -> (bool, str):
+    """
+    Send prepare to a node.
+    :param address: address of node
+    :param data: data, e.g. [{"data_id": "1", "raw": "a", "signature": "aaa"}]
+    :return: result, bool and msg if failed.
+    """
     ret = False
     msg = None
     try:
@@ -69,6 +95,11 @@ def send_prepare(address, data) -> (bool, str):
 
 
 def send_submit(address) -> (bool, str):
+    """
+    Send submit to a node.
+    :param address: address of node
+    :return: result, bool and msg if failed.
+    """
     ret = False
     msg = None
     try:
@@ -84,6 +115,12 @@ def send_submit(address) -> (bool, str):
 
 
 def send_rollback(address, data) -> (bool, str):
+    """
+    Send rollback to a node.
+    :param address: address of node
+    :param data: data, e.g. [{"data_id": "1", "raw": "a", "signature": "aaa"}]
+    :return: result, bool and msg if failed.
+    """
     ret = False
     msg = None
     try:
@@ -100,6 +137,10 @@ def send_rollback(address, data) -> (bool, str):
 
 
 def get_all_node() -> dict:
+    """
+    Get all node from central node.
+    :return: list of nodes, e.g. [{"name":"aaa", "address":"1.1.1.1"}]
+    """
     try:
         r = requests.get('http://{}/register/'.format(CENTRAL_NODE_ADDRESS)).json()
         return r.get("data", [])
@@ -109,6 +150,10 @@ def get_all_node() -> dict:
 
 
 def get_all_node_leader() -> dict:
+    """
+    Get leader of all node.
+    :return: dict of node's leader, e.g. {"aaa": "bbb"}
+    """
     ret = {}
     for name, address in get_all_node().items():
         try:
@@ -120,6 +165,9 @@ def get_all_node_leader() -> dict:
 
 
 def kill_node(address):
+    """
+    Kill a node!!
+    """
     try:
         requests.get('http://{}/kill/'.format(address)).json()
     except:
