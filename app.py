@@ -2,12 +2,13 @@ import threading
 import time
 
 from flask import Flask, request
-from db import check_data_id_dup, get_all_data, insert_data_to_prepare, submit_prepare, del_prepare
+from db import (check_data_id_dup, get_all_data_from_db, insert_data_to_prepare,
+                submit_prepare, del_prepare, insert_data)
 from collections import OrderedDict, defaultdict
 
 from utils import make_ok_response, make_json_response, make_error_response
 from api_utils import (ping, register, get_all_node, get_all_node_leader,
-                       send_proposal, kill_node, send_prepare, send_submit, send_rollback)
+                       send_proposal, kill_node, send_prepare, send_submit, send_rollback, get_all_data)
 from redis_utils import add_node, del_node, get_all_nodes_from_redis
 from config import IS_CENTRAL_NODE, NODE_PORT, NODE_NAME, NODE_ADDRESS, NODE_CHECK_INTERVAL
 
@@ -18,8 +19,8 @@ LEADER = None
 
 def prepare(data) -> (bool, list):
     """
-
-    :return: result of prepare, False if anyone is False
+    send prepare request to all node, will interrupt and return immediately when any node prepare failed.
+    :return: result of prepare, False if anyone is False, and list of node who prepare success.
     """
     success = []
     for name, address in get_all_node().items():
@@ -31,19 +32,17 @@ def prepare(data) -> (bool, list):
     return True, success
 
 
-def submit() -> (bool, list):
+def submit() -> list:
     """
-
-    :return: result of submit, False if anyone is False
+    send submit request to all node.
+    :return: result of prepare, False if anyone is False, and list of node who prepare success.
     """
-    success = []
+    failed = []
     for name, address in get_all_node().items():
         ret, msg = send_submit(address)
         if not ret:
-            return False, success
-        else:
-            success.append(name)
-    return True
+            failed.append(name)
+    return failed
 
 
 def rollback(nodes, data) -> list:
@@ -105,7 +104,7 @@ def data_handler():
     if IS_CENTRAL_NODE:
         return make_error_response("This is a central node, not provide Data service.")
     if request.method == 'GET':
-        return make_json_response(get_all_data())
+        return make_json_response(get_all_data_from_db())
     if request.method == 'PUT':
         req = request.json
         req['data_id'] = req.get('id')
@@ -204,18 +203,11 @@ def proposal_handler():
                     kill_node(nodes[name])
                 return make_error_response("prepare failed, rollback failed!")
 
-        ret, success = submit()
+        failed = submit()
         if not ret:
-
-            ret = rollback(success, req)
-
-            if not ret:
-                return make_error_response("submit failed, rollback success!")
-            else:
-                nodes = get_all_node()
-                for name in ret:
-                    kill_node(nodes[name])
-                return make_error_response("submit failed, rollback failed!")
+            return make_error_response("submit failed, failed list: {}".format(failed))
+        else:
+            make_ok_response()
 
         return make_ok_response()
 
@@ -241,6 +233,12 @@ def kill_handler():
 
 
 def check_node(name, address) -> bool:
+    """
+    check a node if is alive.
+    :param name: node's name
+    :param address: node's address
+    :return: is node alive
+    """
     alive = ping(address)
     if not alive:
         print("Node {}({}) is gone".format(name, address))
@@ -314,6 +312,21 @@ def node_checker():
         time.sleep(NODE_CHECK_INTERVAL)
 
 
+def syncer():
+    """
+    Running in common node, we assume when a node start, it has no or old data, needs to retrieve from leader.
+    """
+    while True:
+        if not LEADER:
+            time.sleep(1)
+            continue
+        address = get_all_node().get(LEADER, "")
+        if address:
+            data = get_all_data(address)
+            insert_data(data)
+            return
+
+
 if __name__ == '__main__':
 
     # if this is common node and register failed that exit.
@@ -325,7 +338,14 @@ if __name__ == '__main__':
         target = node_checker
     else:
         target = leader_checker
+
+    # run leader_check in common node or node_checker in central node.
     t = threading.Thread(target=target)
     t.start()
+
+    # when start a node, sync data from leader before start api server.
+    sync = threading.Thread(target=syncer)
+    sync.start()
+    sync.join()
 
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)

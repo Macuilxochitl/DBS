@@ -2,6 +2,16 @@ import requests
 from config import CENTRAL_NODE_ADDRESS, NODE_NAME, NODE_ADDRESS
 
 
+def get_all_data(address) -> [dict]:
+    try:
+        r = requests.get('http://{}/data/'.format(address)).json()
+        if r.get("result", "") == "ok":
+            return r.get("data", [])
+    except Exception as e:
+        print(e)
+        return []
+
+
 def ping(address) -> bool:
     ret = False
     try:

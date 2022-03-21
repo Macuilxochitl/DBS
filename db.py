@@ -38,12 +38,16 @@ def get_all_prepare() -> [dict]:
     return [{"data_id": i.data_id, "raw": i.raw, "signature": i.signature} for i in PrepareData.select()]
 
 
-def get_all_data() -> [dict]:
+def get_all_data_from_db() -> [dict]:
     return [{"data_id": i.data_id, "raw": i.raw, "signature": i.signature} for i in Data.select()]
 
 
 def insert_data_to_prepare(data: [dict]) -> bool:
     return PrepareData.insert_many(data).execute()
+
+
+def insert_data(data: [dict]) -> bool:
+    return Data.insert_many(data).on_conflict_replace().execute()
 
 
 def submit_prepare() -> bool:
