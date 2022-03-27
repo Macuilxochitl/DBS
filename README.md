@@ -24,6 +24,11 @@ Change CENTRAL_NODE_ADDRESS in config to central node's address and set IS_CENTR
 
 to start a common node.
 
+### Auto recover
+
+Please using any auto recover mechanism to run node to ensure node can be recovered after it has been killed.
+After it restarted and sync with central node, it will automatically recover all data and start to work.
+
 ## API
 
 ### Get all data from a node
