@@ -246,6 +246,7 @@ def check_node(name, address) -> bool:
     :return: is node alive
     """
     alive = ping(address)
+    print(name, address, "is alive:", alive)
     if not alive:
         print("Node {}({}) is gone".format(name, address))
     return alive
@@ -316,6 +317,7 @@ def node_checker():
     while True:
         nodes = get_all_nodes_from_redis()
         for name, address in nodes.items():
+            print("Checking node {}({})".format(name, address))
             if not check_node(name, address):
                 del_node(name)
         time.sleep(NODE_CHECK_INTERVAL)
@@ -352,9 +354,12 @@ if __name__ == '__main__':
     t = threading.Thread(target=target)
     t.start()
 
-    # when start a node, sync data from leader before start api server.
-    sync = threading.Thread(target=syncer)
-    sync.start()
-    sync.join()
+    if not IS_CENTRAL_NODE:
+        # when start a node, sync data from leader before start api server.
+        sync = threading.Thread(target=syncer)
+        sync.start()
+        sync.join()
+
+    print("Start api server...")
 
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
