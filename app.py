@@ -1,3 +1,5 @@
+import os
+import signal
 import threading
 import time
 
@@ -15,6 +17,7 @@ from config import IS_CENTRAL_NODE, NODE_PORT, NODE_NAME, NODE_ADDRESS, NODE_CHE
 app = Flask(__name__)
 
 LEADER = None
+STOP = False
 
 
 def prepare(data) -> (bool, list):
@@ -235,7 +238,10 @@ def kill_handler():
     :return: Flask response
     """
     if request.method == 'GET':
-        exit(-1)
+        global STOP
+        STOP = True
+        os.kill(os.getpid(), signal.SIGINT)
+        return make_ok_response()
 
 
 def check_node(name, address) -> bool:
@@ -258,6 +264,12 @@ def vote_leader() -> (str, str):
     """
     while True:
         nodes = get_all_node()
+        if not nodes or NODE_NAME not in nodes:
+            # if no node or node not in nodes, need to register again.
+            print("No node alive, register node again...")
+            register()
+            time.sleep(1)
+            continue
 
         # get now all node's leader
         all_node_leader = get_all_node_leader()
@@ -296,9 +308,10 @@ def leader_checker():
     """
     Running in common node, used to check if leader node is alive or will vote for new one.
     """
+    global STOP
     leader_name = None
     leader_address = None
-    while True:
+    while not STOP:
         if not leader_name:
             leader_name, leader_address = vote_leader()
         if not check_node(leader_name, leader_address):
@@ -314,7 +327,8 @@ def node_checker():
     Running in central node, used to check if there's dead node in all registered node,
         and remove it from registered node if it's.
     """
-    while True:
+    global STOP
+    while not STOP:
         nodes = get_all_nodes_from_redis()
         for name, address in nodes.items():
             print("Checking node {}({})".format(name, address))
@@ -345,6 +359,9 @@ if __name__ == '__main__':
         print("Register failed! exiting...")
         exit(-1)
 
+    api_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=NODE_PORT, debug=False))
+    api_thread.start()
+
     if IS_CENTRAL_NODE:
         target = node_checker
     else:
@@ -360,6 +377,4 @@ if __name__ == '__main__':
         sync.start()
         sync.join()
 
-    print("Start api server...")
-
-    app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
+    api_thread.join()
